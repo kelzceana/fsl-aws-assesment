@@ -130,6 +130,6 @@ jobs:
             -var="env=${{ github.ref_name }}"
 
       - name: Upload to s3
-        run: | 
+        run: |
           BUCKET_NAME="${{ secrets.S3_BUCKET_NAME }}-${{ github.ref_name }}"
           aws s3 sync ./codebase/rdicidr-0.1.0/build s3://$BUCKET_NAME/ --delete
