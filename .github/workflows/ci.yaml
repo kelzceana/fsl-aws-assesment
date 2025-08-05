@@ -86,7 +86,7 @@ jobs:
         run: |
           terraform plan \
             -input=false \
-            -var="env=${{ steps.extract_env.outputs.env }}"
+            -var="env=${{ steps.extract_env.outputs.env }}" \
             -out=tfplan
 
   deploy:
