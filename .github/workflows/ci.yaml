@@ -1,0 +1,135 @@
+name: CI Pipeline
+
+on: 
+  pull_request:
+    branches: [devel, stage, prod] 
+  push: 
+    branches: [devel, stage, prod] 
+
+env:
+  TF_VERSION: 1.5.0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+
+    defaults:
+      run:
+        working-directory: codebase/rdicidr-0.1.0/
+
+    steps: 
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '15'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run linter
+        run: npm run lint
+
+      - name: Run formatter
+        run: npm run prettier
+
+      - name: Run tests
+        env: 
+          CI: true
+        run: npm run test
+
+      - name: Build project
+        run: npm run build
+      
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifact
+          path: codebase/rdicidr-0.1.0/build
+
+      - name: Extract env name
+        id: extract_env
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" || ${GITHUB_EVENT_NAME}" == "push" ]]; then
+            ENV_NAME="${GITHUB_BASE_REF}"
+          else
+            ENV_NAME="${GITHUB_BASE_REF##*/}"
+          fi
+          if [[ "$ENV_NAME" == "devel" || "$ENV_NAME" == "stage" || "$ENV_NAME" == "prod" ]]; then
+            echo "env=$ENV_NAME" >> $GITHUB_OUTPUT
+          else
+            echo "env=devel" >> $GITHUB_OUTPUT  # or fail, or skip
+          fi
+        shell: bash
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }} 
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+      - name: Terraform Init
+        working-directory: codebase/rdicidr-0.1.0/terraform/envs/${{ steps.extract_env.outputs.env }}
+        run: terraform init -input=false
+
+      - name: Terraform Plan
+        working-directory: codebase/rdicidr-0.1.0/terraform/envs/${{ steps.extract_env.outputs.env }}
+        run: |
+          terraform plan \
+            -input=false \
+            -var="env=${{ steps.extract_env.outputs.env }}"
+            -out=tfplan
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    environment:
+      name: ${{ github.ref_name }}
+
+    steps: 
+      - name: Check out code
+        uses: actions/checkout@v2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+      
+      - name: download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: build-artifact
+          path: codebase/rdicidr-0.1.0/build
+      
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TF_VERSION }} 
+
+      - name: Terraform Init
+        working-directory: codebase/rdicidr-0.1.0/terraform/envs/${{ github.ref_name }}
+        run: terraform init -input=false
+
+      - name: Terraform Apply
+        working-directory: codebase/rdicidr-0.1.0/terraform/envs/${{ github.ref_name }}
+        run: |
+          terraform apply -auto-approve \
+            -var="env=${{ github.ref_name }}"
+
+      - name: Upload to s3
+        run: |
+          BUCKET_NAME: "${{ secrets.S3_BUCKET_NAME }}-${{ github.ref_name }}"
+          aws s3 sync ./codebase/rdicidr-0.1.0/build s3://$BUCKET_NAME/ --delete
