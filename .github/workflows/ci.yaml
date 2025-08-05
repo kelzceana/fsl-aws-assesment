@@ -53,10 +53,10 @@ jobs:
       - name: Extract env name
         id: extract_env
         run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" || ${GITHUB_EVENT_NAME}" == "push" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" || "${GITHUB_EVENT_NAME}" == "push" ]]; then
             ENV_NAME="${GITHUB_BASE_REF}"
           else
-            ENV_NAME="${GITHUB_BASE_REF##*/}"
+            ENV_NAME="${GITHUB_REF##*/}"
           fi
           if [[ "$ENV_NAME" == "devel" || "$ENV_NAME" == "stage" || "$ENV_NAME" == "prod" ]]; then
             echo "env=$ENV_NAME" >> $GITHUB_OUTPUT
